@@ -1,0 +1,206 @@
+# Spotify Songs Genre Segmentation and Recommendation System
+
+# ----------------------------
+# Import Required Libraries
+# ----------------------------
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+
+# ----------------------------
+# Load Dataset
+# ----------------------------
+dataset_path = 'spotify.csv'
+try:
+    spotify_df = pd.read_csv(dataset_path)
+    print("Spotify dataset loaded successfully!\n")
+except FileNotFoundError:
+    print(f"Error: '{dataset_path}' not found.")
+    exit()
+
+# ----------------------------
+# Explore Dataset
+# ----------------------------
+print(spotify_df.head())
+print("\nDataset Info:")
+print(spotify_df.info())
+print("\nStatistical Summary:")
+print(spotify_df.describe())
+
+# ----------------------------
+# Data Pre-processing
+# ----------------------------
+# Remove missing values
+spotify_df.dropna(inplace=True)
+
+# Remove duplicates based on track_name
+spotify_df.drop_duplicates(subset=['track_name'], inplace=True)
+print(f"\nUnique songs retained: {len(spotify_df)}")
+
+# Select numeric audio features for clustering
+features = ['acousticness', 'danceability', 'energy', 'instrumentalness',
+            'liveness', 'loudness', 'speechiness', 'tempo', 'valence']
+X = spotify_df[features]
+
+# Feature scaling
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+print("\nFeature scaling completed!")
+
+# ----------------------------
+# Data Visualization
+# ----------------------------
+plt.figure(figsize=(20,5))
+
+# 1. Track Popularity
+plt.subplot(1, 4, 1)
+sns.histplot(spotify_df['track_popularity'], kde=True, color='blue')
+plt.title('Track Popularity')
+plt.xlabel('Popularity')
+plt.ylabel('Frequency')
+
+# 2. Danceability
+plt.subplot(1, 4, 2)
+sns.histplot(spotify_df['danceability'], kde=True, color='purple')
+plt.title('Danceability')
+plt.xlabel('Danceability')
+plt.ylabel('Frequency')
+
+# 3. Energy
+plt.subplot(1, 4, 3)
+sns.histplot(spotify_df['energy'], kde=True, color='purple')
+plt.title('Energy')
+plt.xlabel('Energy')
+plt.ylabel('Frequency')
+
+# 4. Valence
+plt.subplot(1, 4, 4)
+sns.histplot(spotify_df['valence'], kde=True, color='purple')
+plt.title('Valence')
+plt.xlabel('Valence')
+plt.ylabel('Frequency')
+
+plt.tight_layout()
+plt.show()
+
+# Top 10 Playlist Genres
+plt.figure(figsize=(12, 6))
+top_genres = spotify_df['playlist_genre'].value_counts().nlargest(10)
+sns.barplot(x=top_genres.values, y=top_genres.index, palette='viridis')
+plt.title('Top 10 Playlist Genres')
+plt.xlabel('Number of Tracks')
+plt.ylabel('Genre')
+plt.show()
+
+# Correlation Matrix of Audio Features
+plt.figure(figsize=(10, 8))
+sns.heatmap(spotify_df[features].corr(), annot=True, cmap='coolwarm')
+plt.title('Correlation Matrix of Audio Features')
+plt.show()
+
+# ----------------------------
+# Clustering using K-Means
+# ----------------------------
+optimal_k = 5
+kmeans = KMeans(n_clusters=optimal_k, init='k-means++', random_state=42)
+spotify_df['cluster'] = kmeans.fit_predict(X_scaled)
+print(f"\nK-Means clustering applied with {optimal_k} clusters.")
+
+# PCA Visualization
+pca = PCA(n_components=2)
+pca_result = pca.fit_transform(X_scaled)
+pca_df = pd.DataFrame(pca_result, columns=['PCA1', 'PCA2'])
+pca_df['cluster'] = spotify_df['cluster']
+
+plt.figure(figsize=(10, 7))
+sns.scatterplot(data=pca_df, x='PCA1', y='PCA2', hue='cluster', palette='Spectral', s=70, alpha=0.8)
+plt.title('2D PCA Visualization of Song Clusters')
+plt.legend(title='Cluster')
+plt.show()
+
+# ----------------------------
+# Cluster-wise Genre Distribution
+# ----------------------------
+plt.figure(figsize=(12, 8))
+for i in range(optimal_k):
+    plt.subplot(2, 3, i+1)
+    cluster_data = spotify_df[spotify_df['cluster'] == i]
+    top_genres_cluster = cluster_data['playlist_genre'].value_counts().nlargest(5)
+    sns.barplot(x=top_genres_cluster.values, y=top_genres_cluster.index, palette='magma')
+    plt.title(f'Cluster {i} Top Genres')
+    plt.xlabel('Number of Tracks')
+    plt.ylabel('Genre')
+plt.tight_layout()
+plt.show()
+
+# ----------------------------
+# Cluster-wise Playlist Distribution
+# ----------------------------
+plt.figure(figsize=(12, 8))
+for i in range(optimal_k):
+    plt.subplot(2, 3, i+1)
+    cluster_data = spotify_df[spotify_df['cluster'] == i]
+    top_playlists_cluster = cluster_data['playlist_name'].value_counts().nlargest(5)
+    sns.barplot(x=top_playlists_cluster.values, y=top_playlists_cluster.index, palette='cool')
+    plt.title(f'Cluster {i} Top Playlists')
+    plt.xlabel('Number of Tracks')
+    plt.ylabel('Playlist Name')
+plt.tight_layout()
+plt.show()
+
+# ----------------------------
+# Cluster Analysis
+# ----------------------------
+cluster_features_avg = spotify_df.groupby('cluster')[features].mean()
+print("\nAverage Audio Features per Cluster:")
+print(cluster_features_avg)
+
+if 'duration_ms' in spotify_df.columns:
+    spotify_df['duration_min'] = spotify_df['duration_ms'] / 60000
+    cluster_duration = spotify_df.groupby('cluster')['duration_min'].mean()
+    print("\nAverage Song Duration (minutes) per Cluster:")
+    print(cluster_duration)
+
+top_artists = spotify_df.groupby('cluster')['track_artist'].apply(lambda x: x.value_counts().head(3))
+print("\nTop Artists per Cluster:")
+print(top_artists)
+
+# ----------------------------
+# Recommendation Function
+# ----------------------------
+def recommend_songs(song_title, data=spotify_df, num_suggestions=5):
+    if song_title not in data['track_name'].values:
+        return f"'{song_title}' not found in dataset."
+    
+    cluster_id = data.loc[data['track_name'] == song_title, 'cluster'].iloc[0]
+    similar_songs = data[(data['cluster'] == cluster_id) & (data['track_name'] != song_title)]
+    
+    if similar_songs.empty:
+        return "No other songs found in the same cluster."
+    
+    similar_songs = similar_songs.reset_index(drop=True)
+    
+    return similar_songs.sample(n=min(num_suggestions, len(similar_songs)), random_state=None)[
+        ['track_name', 'track_artist', 'playlist_genre']]
+
+# ----------------------------
+# Example Recommendations
+# ----------------------------
+examples = ["bad guy", "Bohemian Rhapsody - Remastered 2011"]
+for song in examples:
+    print(f"\nRecommendations for '{song}':")
+    print(recommend_songs(song))
+
+# Random recommendations multiple times
+for i in range(3):
+    print(f"\nRandom Recommendations Attempt {i+1}:")
+    print(recommend_songs("I Don't Care (with Justin Bieber) - Loud Luxury Remix"))
+
+# ----------------------------
+# End of Project
+# ----------------------------
+print("\nProject Execution Completed Successfully!")
